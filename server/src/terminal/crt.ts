@@ -56,6 +56,7 @@ enum EscMode {
     VTAB = 4,    // VT: waiting for row address byte
     VATTR = 5,   // ESC 0: waiting for attribute byte
     HADDR = 6,   // DLE: waiting for horizontal address byte
+    CSI = 7,     // VT100 ESC [ parameters ... final byte
 }
 
 export interface CenturionCRTOptions {
@@ -83,8 +84,11 @@ export class CenturionCRT {
 
     private escMode = EscMode.NORMAL;
     private escExtra = 0;
+    private csiParameters = '';
     private statusCode: number[] = [];
     private lastBuffer: Uint16Array | null = null;
+    private lastCursorX = -1;
+    private lastCursorY = -1;
 
     constructor(private opts: CenturionCRTOptions = {}) {
         this.buffer.fill(32); // blank screen
@@ -99,8 +103,10 @@ export class CenturionCRT {
         this.showCtrl = false;
         this.charEdit = INS_NONE;
         this.escMode = EscMode.NORMAL;
+        this.csiParameters = '';
         this.escExtra = 0;
         this.lastBuffer = null;
+        this.lastCursorX = this.lastCursorY = -1;
     }
 
     getCell(col: number, row: number): number {
@@ -155,6 +161,52 @@ export class CenturionCRT {
         this.setCursor(0, 0);
     }
 
+    // Support the VT100 cursor positioning and erasure sequences used by
+    // programs alongside the native Centurion protocol. Unknown CSI commands
+    // are consumed rather than displayed as text.
+    private receiveCsi(c: number): void {
+        if ((c >= 48 && c <= 57) || c === 59 || c === 63) {
+            if (this.csiParameters.length < 32) {
+                this.csiParameters += String.fromCharCode(c);
+                this.escMode = EscMode.CSI;
+            }
+            return;
+        }
+        if (c === 27) { this.escMode = EscMode.ESC; return; }
+        if (c < 0x40 || c > 0x7e || this.csiParameters.startsWith('?')) return;
+        const parameters = this.csiParameters.split(';').map(p => p ? parseInt(p, 10) : 0);
+        const n = parameters[0] || 0;
+        if (c === 72 || c === 102) { // CUP / HVP, one-based row;column
+            this.setCursor((parameters[1] || 1) - 1, (parameters[0] || 1) - 1);
+        } else if (c === 71) { // CHA, one-based column on the current row
+            this.setCursor(Math.min(n || 1, CRT_COLS) - 1, this.cursorY);
+        } else if (c === 74) { // ED
+            const pos = this.cursorY * CRT_COLS + this.cursorX;
+            const start = n === 1 || n === 2 ? 0 : pos;
+            const end = n === 1 ? pos + 1 : CRT_MAIN;
+            if (n <= 2) for (let i = start; i < end; i++) this.setCell(i, 32);
+        } else if (c === 75) { // EL
+            const row = this.cursorY * CRT_COLS;
+            const start = n === 1 || n === 2 ? 0 : this.cursorX;
+            const end = n === 1 ? this.cursorX + 1 : CRT_COLS;
+            if (n <= 2) for (let i = start; i < end; i++) this.setCell(row + i, 32);
+        } else if (c === 109) { // SGR: VT100 visual attributes
+            for (const value of parameters) {
+                if (value === 0) this.charAttr &= ~(A_HALF | A_BLINK | A_ZERO | A_REVERSE | A_UNDER);
+                else if (value === 1 || value === 22) this.charAttr &= ~A_HALF;
+                else if (value === 2) this.charAttr |= A_HALF;
+                else if (value === 4) this.charAttr |= A_UNDER;
+                else if (value === 5) this.charAttr |= A_BLINK;
+                else if (value === 7) this.charAttr |= A_REVERSE;
+                else if (value === 8) this.charAttr |= A_ZERO;
+                else if (value === 24) this.charAttr &= ~A_UNDER;
+                else if (value === 25) this.charAttr &= ~A_BLINK;
+                else if (value === 27) this.charAttr &= ~A_REVERSE;
+                else if (value === 28) this.charAttr &= ~A_ZERO;
+            }
+        }
+    }
+
     // ---- status message (ESC 0x05) ----
 
     makeStatus(): void {
@@ -180,6 +232,9 @@ export class CenturionCRT {
             const lastMode = this.escMode;
             this.escMode = EscMode.NORMAL;
             switch (lastMode) {
+                case EscMode.CSI:
+                    this.receiveCsi(c);
+                    return;
                 case EscMode.SEL_ROW:
                     this.escExtra = c - 32;
                     this.escMode = EscMode.SEL_COL;
@@ -211,6 +266,10 @@ export class CenturionCRT {
 
             // ---- ESC command dispatch ----
             switch (c) {
+                case 91: // '[' begins a VT100 CSI sequence
+                    this.csiParameters = '';
+                    this.escMode = EscMode.CSI;
+                    return;
                 case 5: // transmit status message
                     this.makeStatus();
                     if (this.onStatusMessage) this.onStatusMessage(this.statusCode.slice());
@@ -376,6 +435,10 @@ export class CenturionCRT {
             }
         }
 
+        if (out || this.cursorX !== this.lastCursorX || this.cursorY !== this.lastCursorY)
+            out += cursorPos(this.cursorY + 1, this.cursorX + 1);
+        this.lastCursorX = this.cursorX;
+        this.lastCursorY = this.cursorY;
         if (first) this.lastBuffer = new Uint16Array(CRT_CELLS);
         this.lastBuffer!.set(this.buffer);
         return out;

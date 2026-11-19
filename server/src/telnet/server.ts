@@ -159,8 +159,8 @@ class TelnetSessionImpl implements TelnetSession {
             } else if (b === 10) {
                 // LF alone
                 this.handleKey('\n');
-            } else if (b >= 32 || b === 9 || b === 27) {
-                // Printable, tab, escape
+            } else if (b >= 32 || b === 9 || b === 27 || b === 3 || b === 4 || b === 25) {
+                // Printable, tab, escape, CENTOS break and BASIC editor controls
                 this.handleKey(String.fromCharCode(b));
             }
         }
@@ -242,7 +242,7 @@ export function createTelnetServer(
         });
     });
 
-    server.listen(port, () => {
+    server.listen(port, process.env.CENTURION_BIND || '127.0.0.1', () => {
         console.log(`[${label}] Telnet server listening on port ${port}`);
     });
 

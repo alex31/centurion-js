@@ -6,6 +6,7 @@
 // ============================================================
 
 import * as fs from 'fs';
+import { readFirmware } from './firmware';
 
 let defineResult: any = null;
 
@@ -59,6 +60,7 @@ export function loadAMDModule(absolutePath: string): void {
     if (!fs.existsSync(absolutePath)) {
         throw new Error(`cen.js not found at: ${absolutePath}`);
     }
+    (global as any).window.__cenFirmware = readFirmware(absolutePath);
 
     defineResult = null;
 
@@ -185,7 +187,7 @@ export function loadAMDModule(absolutePath: string): void {
             // Config save to localStorage with black hole data — harmless
             return;
         }
-        console.error('[AMD] Uncaught:', e.message);
+        throw e;
     });
 }
 

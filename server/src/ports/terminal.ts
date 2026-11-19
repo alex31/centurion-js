@@ -13,10 +13,10 @@
 import { TelnetSession } from '../telnet/server';
 import { CharDevice } from '../../../shared/interfaces';
 import {
-    Color, fg, ansiReset, bold,
     clearScreen, cursorHome, cursorShow,
 } from '../telnet/ansi';
 import { CenturionCRT } from '../terminal/crt';
+import { sendTerminalInput, terminalKey } from '../terminal/input';
 
 export class TelnetTerminal implements CharDevice {
     emu_linked = true;
@@ -56,21 +56,6 @@ export class TelnetTerminal implements CharDevice {
 
         this.start();
         this.clearScreen();
-        this.showBanner();
-    }
-
-    private showBanner(): void {
-        const w = this.session.cols || 80;
-        const pad = (s: string) => s.padStart(Math.floor((w + s.length) / 2)).padEnd(w);
-        this.session.writeln('');
-        this.session.writeln(bold() + fg(Color.BRIGHT_CYAN) + pad('╔══════════════════════════════════╗') + ansiReset());
-        this.session.writeln(bold() + fg(Color.BRIGHT_CYAN) + pad('║   CENTURION CPU-6  TERMINAL 0   ║') + ansiReset());
-        this.session.writeln(bold() + fg(Color.BRIGHT_CYAN) + pad('║     Serial CRT Emulation        ║') + ansiReset());
-        this.session.writeln(bold() + fg(Color.BRIGHT_CYAN) + pad('╚══════════════════════════════════╝') + ansiReset());
-        this.session.writeln('');
-        this.session.writeln(fg(Color.BRIGHT_BLACK) + 'Waiting for CPU to boot...' + ansiReset());
-        this.session.writeln(fg(Color.BRIGHT_BLACK) + 'Ensure OpSys (S2) and R/F (S4) are ON in the Control Panel.' + ansiReset());
-        this.session.writeln('');
     }
 
     private start(): void {
@@ -88,38 +73,9 @@ export class TelnetTerminal implements CharDevice {
     }
 
     private handleInput(key: string): void {
-        // Map common keystrokes to Centurion terminal codes
-        let codes: number[] | null = null;
-
-        switch (key) {
-            case '\r':
-            case '\n':
-                codes = [13];
-                break;
-            case '\x7f': // Backspace / DEL
-                codes = [8];
-                break;
-            case '\t':
-                codes = [9];
-                break;
-            case '\x1b':
-                codes = [27];
-                break;
-            case '\x1b[A': case '\x1bOA': codes = [26]; break; // Up
-            case '\x1b[B': case '\x1bOB': codes = [10]; break; // Down
-            case '\x1b[C': case '\x1bOC': codes = [6];  break; // Right
-            case '\x1b[D': case '\x1bOD': codes = [21]; break; // Left
-            default:
-                if (key.length === 1) {
-                    codes = [key.charCodeAt(0)];
-                }
-                break;
-        }
-
-        if (codes) {
-            for (const c of codes) {
-                this.inputBuf.push(c & 127);
-            }
+        const code = terminalKey(key);
+        if (code !== undefined) {
+            this.inputBuf.push(code);
             this.flushInput();
         }
     }
@@ -129,13 +85,15 @@ export class TelnetTerminal implements CharDevice {
     private flushInput(): void {
         // Don't send input until MUX is configured (ROM has booted far enough)
         if (!this.muxConfigured) return;
-        // Send one char at a time to MUX to avoid overrun.
-        const muxPort = this.get_dev() as any;
-        if (!muxPort || this.inputBuf.length === 0) return;
-        if (!muxPort.read_busy) {
-            const ch = this.inputBuf.shift()!;
-            muxPort.receive(ch);
-        }
+        sendTerminalInput(this.muxDev, this.inputBuf);
+    }
+
+    reset(): void {
+        this.inputBuf.length = 0;
+        this.muxConfigured = false;
+        this.outputDirty = false;
+        this.crt.reset();
+        this.clearScreen();
     }
 
     // ---- CharDevice implementation ----

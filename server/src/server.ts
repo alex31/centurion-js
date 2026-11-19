@@ -13,6 +13,7 @@
 //   2324 - Terminal 0 (CRT 0)
 //   2325 - Terminal 1 (CRT 1)
 //   2326 - Disk Manager
+//   2327 - Raw serial connection to MUX 1 (one client, no Telnet)
 //
 // WebSocket:
 //   42646 - Browser UI connection
@@ -21,13 +22,14 @@
 import { CoreEmulator } from './core/emulator';
 import { ControlPanelSession } from './ports/control-panel';
 import { TelnetTerminal } from './ports/terminal';
+import { RawSerialServer } from './ports/raw-serial';
 import { DiskManagerSession, ManagedDisk } from './ports/disk-manager';
 import { EmuWebSocketServer } from './ws-server';
+import { WebConsole } from './web-console';
+import { WebTerminal } from './terminal/web-terminal';
 import { createTelnetServer, TelnetSession } from './telnet/server';
-import {
-    ServerConfig, DEFAULT_CONFIG, ICCPU,
-    CharDevice, DiskImage,
-} from '../../shared/interfaces';
+import * as fs from 'fs';
+import { ServerConfig, DEFAULT_CONFIG } from '../../shared/interfaces';
 
 // ---- Server State ----
 
@@ -62,26 +64,43 @@ const terminalSessions: TelnetTerminal[] = [];
 interface MuxTap {
     history: number[];
     listeners: TelnetTerminal[];
+    web: WebTerminal;
 }
 const muxTaps: (MuxTap | null)[] = [];
+let rawSerial1: RawSerialServer | undefined;
 {
     const mux = (global as any).window?.io_mux;
     if (mux?.muxports) {
         for (let i = 0; i < 2; i++) {
             const port = mux.muxports[i];
             if (!port) { muxTaps.push(null); continue; }
-            const tap: MuxTap = { history: [], listeners: [] };
+            const web = new WebTerminal(port,
+                () => i === 0 || !rawSerial1?.connected,
+                () => dashboard.connected && !muxTaps[i]?.listeners.length);
+            const tap: MuxTap = { history: [], listeners: [], web };
             muxTaps.push(tap);
             const origWD = port.write_data.bind(port);
             port.write_data = (v: number) => {
                 const c = v & 0x7F;
-                tap.history.push(c);
-                for (const t of tap.listeners) t.receive(c);
+                if (i === 1 && rawSerial1?.connected) {
+                    rawSerial1.write(c);
+                } else {
+                    tap.history.push(c);
+                    tap.web.receive(c);
+                    for (const t of tap.listeners) t.receive(c);
+                }
                 return origWD(v);
             };
         }
     } else {
         muxTaps.push(null, null);
+    }
+}
+{
+    const port = (global as any).window?.io_mux?.muxports?.[1];
+    if (port) {
+        rawSerial1 = new RawSerialServer(2327, port, () => !!muxTaps[1]?.listeners.length);
+        emulator.onHardwareTick(steps => rawSerial1?.advance(steps));
     }
 }
 function attachTerminal(portIndex: number, term: TelnetTerminal): void {
@@ -96,7 +115,6 @@ function attachTerminal(portIndex: number, term: TelnetTerminal): void {
 // ---- WebSocket Server (for browser UI) ----
 
 const wsServer = new EmuWebSocketServer(
-    config.websocket.port,
     emulator.cpu,
     emulator.serialDevices,
     {
@@ -120,6 +138,48 @@ const wsServer = new EmuWebSocketServer(
     }
 );
 
+const bind = process.env.CENTURION_BIND || '127.0.0.1';
+const dashboard = new WebConsole(emulator, muxTaps.map(tap => tap?.web ?? null), {
+    reset: resetSystem,
+    update: updateDisplays,
+    shutdown: shutdownServer,
+}, bind);
+dashboard.http.on('upgrade', (request, socket, head) => {
+    if (request.url === '/console') dashboard.upgrade(request, socket, head);
+    else wsServer.upgrade(request, socket, head);
+});
+dashboard.http.listen(config.websocket.port, bind, () => {
+    const address = bind.includes(':') ? `[${bind}]` : bind;
+    console.log(`[Web console] http://${address}:${config.websocket.port}/`);
+});
+
+setInterval(() => {
+    for (const tap of muxTaps) tap?.web.tick();
+}, 20);
+
+function resetSystem(): void {
+    for (const tap of muxTaps) {
+        if (!tap) continue;
+        tap.history.length = 0;
+        tap.web.reset();
+        for (const listener of tap.listeners) listener.reset();
+    }
+    emulator.reset();
+}
+
+function updateDisplays(): void {
+    updateControlPanels();
+    wsServer.broadcastState();
+    dashboard.broadcast();
+}
+
+function shutdownServer(): void {
+    console.log('  Shutting down...');
+    emulator.stop();
+    rl.close();
+    process.exit(0);
+}
+
 // ---- Control Panel Update ----
 
 function updateControlPanels(): void {
@@ -136,7 +196,9 @@ createTelnetServer(
         const cp = new ControlPanelSession(emulator.cpu, null, session, emulator);
         controlPanelSessions.push(cp);
 
+        const closeControlPanel = session.onClose;
         session.onClose = () => {
+            if (closeControlPanel) closeControlPanel();
             const idx = controlPanelSessions.indexOf(cp);
             if (idx >= 0) controlPanelSessions.splice(idx, 1);
         };
@@ -154,7 +216,9 @@ createTelnetServer(
         terminalSessions.push(term);
         emulator.serialDevices.push(term);
 
+        const closeTerminal = session.onClose;
         session.onClose = () => {
+            if (closeTerminal) closeTerminal();
             const idx = terminalSessions.indexOf(term);
             if (idx >= 0) terminalSessions.splice(idx, 1);
             const sidx = emulator.serialDevices.indexOf(term);
@@ -184,12 +248,18 @@ createTelnetServer(
 createTelnetServer(
     config.telnet.terminal1,
     (session: TelnetSession) => {
+        if (rawSerial1?.connected) {
+            session.close();
+            return;
+        }
         const term = new TelnetTerminal(session);
         term.name = 'TelnetTerm1';
         terminalSessions.push(term);
         emulator.serialDevices.push(term);
 
+        const closeTerminal = session.onClose;
         session.onClose = () => {
+            if (closeTerminal) closeTerminal();
             const idx = terminalSessions.indexOf(term);
             if (idx >= 0) terminalSessions.splice(idx, 1);
             const sidx = emulator.serialDevices.indexOf(term);
@@ -234,9 +304,8 @@ createTelnetServer(
 // ---- State broadcast timer ----
 
 setInterval(() => {
-    if (emulator.isRunning) {
-        wsServer.broadcastState();
-    }
+    if (emulator.isRunning) wsServer.broadcastState();
+    dashboard.broadcast();
 }, 200); // 5 Hz state updates to browser
 
 // ---- Console commands (for the server process itself) ----
@@ -257,11 +326,12 @@ console.log(`║    Control Panel : port ${String(config.telnet.controlPanel).pa
 console.log(`║    Terminal 0    : port ${String(config.telnet.terminal0).padStart(5)}                    ║`);
 console.log(`║    Terminal 1    : port ${String(config.telnet.terminal1).padStart(5)}                    ║`);
 console.log(`║    Disk Manager  : port ${String(config.telnet.diskManager).padStart(5)}                    ║`);
+console.log('║    Raw serial 1  : port  2327                    ║');
 console.log('║                                                  ║');
-console.log('║  WebSocket (Browser):                             ║');
+console.log('║  Web console (HTTP + WebSocket):                             ║');
 console.log(`║    port ${String(config.websocket.port).padStart(5)}                                 ║`);
 console.log('╠══════════════════════════════════════════════════╣');
-console.log('║  Commands: s(tep) r(un) h(alt) q(uit)            ║');
+console.log('║  Commands: s(tep) r(un) h(alt) save FILE q(uit) ║');
 console.log('╚══════════════════════════════════════════════════╝');
 console.log('');
 
@@ -269,6 +339,24 @@ rl.prompt();
 
 rl.on('line', (line: string) => {
     const cmd = line.trim().toLowerCase();
+    const save = line.trim().match(/^save\s+(.+)$/i);
+
+    if (save) {
+        const wasRunning = emulator.isRunning;
+        emulator.stop();
+        try {
+            const disk = emulator.getHawkImage();
+            if (!disk?.data) throw new Error('No disk in DSK2 unit 1');
+            fs.writeFileSync(save[1], Buffer.from(disk.data), { flag: 'wx' });
+            console.log(`  Disk image saved to ${save[1]}`);
+        } catch (err: any) {
+            console.error(`  Save failed: ${err.message}`);
+        } finally {
+            if (wasRunning) emulator.start();
+        }
+        rl.prompt();
+        return;
+    }
 
     switch (cmd) {
         case 's':
@@ -294,19 +382,15 @@ rl.on('line', (line: string) => {
             break;
 
         case 'reset':
-            emulator.reset();
-            updateControlPanels();
-            wsServer.broadcastState();
+            resetSystem();
+            updateDisplays();
             console.log('  CPU reset.');
             break;
 
         case 'q':
         case 'quit':
         case 'exit':
-            console.log('  Shutting down...');
-            emulator.stop();
-            rl.close();
-            process.exit(0);
+            shutdownServer();
             break;
 
         case 'help':
@@ -316,6 +400,7 @@ rl.on('line', (line: string) => {
             console.log('    r, run    - Start continuous emulation');
             console.log('    h, halt   - Halt emulation');
             console.log('    reset     - Reset CPU');
+            console.log('    save FILE - Save DSK2 unit 1 to a new image');
             console.log('    q, quit   - Shutdown server');
             break;
 

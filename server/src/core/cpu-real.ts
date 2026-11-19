@@ -7,6 +7,7 @@
 
 import { installPolyfills } from './polyfills';
 import { loadAMDModule } from './amd-loader';
+import { FirmwareError } from './firmware';
 import { ICCPU, BreakFunction, DMADevice } from '../../../shared/interfaces';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -38,7 +39,7 @@ export function loadRealCPU(): ICCPU {
     try {
         loadAMDModule(cenJsPath);
     } catch (err) {
-        console.error('[Bridge] Failed to load cen.js:', err);
+        if (!(err instanceof FirmwareError)) console.error('[Bridge] Failed to load cen.js:', err);
         throw err;
     }
 

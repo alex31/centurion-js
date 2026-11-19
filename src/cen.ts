@@ -3,7 +3,7 @@
 import type * as monaco from 'monaco-editor';
 
 //@ts-ignore
-window.cen_ts_version = 21;
+window.cen_ts_version = 22;
 // hi there
 const view_reg = document.getElementById('view_reg') as HTMLInputElement;
 const view_page = document.getElementById('view_page') as HTMLInputElement;
@@ -1956,6 +1956,10 @@ class VTerm implements CharDevice {
 			case 1: // SOH
 				this.set_cursor(0, VTerm.rowb);
 				break;
+			case 4: // EOT
+			case 5: // ENQ outside an escape sequence
+				// CENTOS echoes these nonprinting bytes during single-key input.
+				return;
 			case 6: // ACK
 				this.advance_cursor();
 				return;

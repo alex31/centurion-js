@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Centurion CPU6 Console</title>
+    <link rel="stylesheet" href="/console.css">
+    <script src="/console.js" defer></script>
+</head>
+<body>
+    <main>
+        <header>
+            <h1>Centurion CPU6</h1>
+            <output id="connection" aria-live="polite">Connecting</output>
+        </header>
+
+        <section class="panel" aria-labelledby="machine-title">
+            <div class="panel-head">
+                <h2 id="machine-title">Control panel</h2>
+                <div class="actions">
+                    <button data-action="run" disabled>Run</button>
+                    <button data-action="pause" disabled>Pause</button>
+                    <button data-action="step" disabled>Step</button>
+                    <button data-action="reset" disabled>Reset CPU</button>
+                </div>
+            </div>
+            <dl id="registers" class="registers">
+                <div><dt>PC</dt><dd id="pc">—</dd></div>
+                <div><dt>Level</dt><dd id="level">—</dd></div>
+                <div><dt>Map</dt><dd id="map">—</dd></div>
+                <div><dt>CC</dt><dd id="cc">—</dd></div>
+                <div><dt>A</dt><dd id="reg-a">—</dd></div>
+                <div><dt>B</dt><dd id="reg-b">—</dd></div>
+                <div><dt>X</dt><dd id="reg-x">—</dd></div>
+                <div><dt>Y</dt><dd id="reg-y">—</dd></div>
+                <div><dt>Z</dt><dd id="reg-z">—</dd></div>
+                <div><dt>S</dt><dd id="reg-s">—</dd></div>
+                <div><dt>C</dt><dd id="reg-c">—</dd></div>
+                <div><dt>P</dt><dd id="reg-p">—</dd></div>
+            </dl>
+        </section>
+
+        <div class="terminals">
+            <section class="terminal" aria-labelledby="crt0-title">
+                <div class="panel-head">
+                    <h2 id="crt0-title">CRT0</h2>
+                    <button class="boot" data-port="0" disabled>Boot CENTOS</button>
+                </div>
+                <div class="screen" id="crt0" tabindex="0" aria-label="CRT0 terminal"></div>
+                <output id="crt0-status" aria-live="polite"></output>
+            </section>
+            <section class="terminal" aria-labelledby="crt1-title">
+                <div class="panel-head">
+                    <h2 id="crt1-title">CRT1</h2>
+                    <button class="boot" data-port="1" disabled>Boot CENTOS</button>
+                </div>
+                <div class="screen" id="crt1" tabindex="0" aria-label="CRT1 terminal"></div>
+                <output id="crt1-status" aria-live="polite"></output>
+            </section>
+        </div>
+
+        <section class="panel disks" aria-labelledby="disk-title">
+            <div class="panel-head">
+                <h2 id="disk-title">Disk images</h2>
+                <div class="actions">
+                    <input id="image-file" type="file" accept=".img,.bin" hidden>
+                    <button id="load-image" disabled>Load image</button>
+                    <button id="save-image" disabled>Save image</button>
+                    <button class="danger" data-action="shutdown" disabled>Stop server</button>
+                </div>
+            </div>
+            <ul id="disk-list"></ul>
+            <output id="notice" role="status"></output>
+        </section>
+    </main>
+</body>
+</html>

@@ -5,6 +5,8 @@
 // as a monitoring/control frontend to the server-side emulator.
 // ============================================================
 
+import { IncomingMessage } from 'node:http';
+import { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
 import { ICCPU, CharDevice, WSMessageType } from '../../shared/interfaces';
 
@@ -62,7 +64,6 @@ export class EmuWebSocketServer {
     private cpuStateBuf = new Uint8Array(4096);
 
     constructor(
-        port: number,
         cpu: ICCPU,
         serialDevices: CharDevice[],
         callbacks: WSServerCallbacks
@@ -71,12 +72,15 @@ export class EmuWebSocketServer {
         this.serials = serialDevices;
         this.callbacks = callbacks;
 
-        this.wss = new WebSocketServer({ port });
-        console.log(`[WebSocket] Server listening on port ${port}`);
+        this.wss = new WebSocketServer({noServer: true});
 
         this.wss.on('connection', (ws: WebSocket) => {
             this.handleConnection(ws);
         });
+    }
+
+    upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+        this.wss.handleUpgrade(req, socket, head, ws => this.wss.emit('connection', ws));
     }
 
     private handleConnection(ws: WebSocket): void {

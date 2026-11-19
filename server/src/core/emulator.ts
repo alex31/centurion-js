@@ -14,11 +14,12 @@ import {
     ICCPU, BreakFunction, DMADevice, DMAControl,
     DiskImage, DiskContainer,
     CharDevice, MemAccess, IOAccess, Run,
-    MemStatus, FINCH_TRACK, FINCH_PLAT,
+    MemStatus, FINCH_TRACK, FINCH_PLAT, DEFAULT_CONFIG,
 } from '../../../shared/interfaces';
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { FirmwareError } from './firmware';
 
 // Lazy import of real CPU bridge to avoid loading polyfills at import time
 let loadRealCPU: (() => ICCPU) | null = null;
@@ -27,6 +28,9 @@ let isRealCPULoaded: (() => boolean) | null = null;
 // ============================================================
 // Utility functions (mirrored from cen.ts)
 // ============================================================
+
+/** Supported byte counts for raw Hawk images. */
+export const HAWK_STRIDES = new Map([[5196800, 400], [6651904, 512]]);
 
 export function hex(value: number, digits: number = 4): string {
     let s = (value >>> 0).toString(16).toUpperCase();
@@ -307,9 +311,10 @@ export class CoreEmulator {
     serialDevices: CharDevice[] = [];
     private runInterval: NodeJS.Timeout | null = null;
     private _isRunning = false;
-    private _runRate = 50000; // High-speed batch mode (>10000 triggers hsstep)
+    private _runRate = DEFAULT_CONFIG.emulation.runRate; // Mode 7: 100000 steps per tick
     private _stepCallback: (() => void) | null = null;
     private _stateCallback: (() => void) | null = null;
+    private hardwareTickListeners: ((steps: number) => void)[] = [];
 
     constructor() {
         console.log('[Core] Initializing Centurion CPU-6 Emulator...');
@@ -330,43 +335,46 @@ export class CoreEmulator {
     }
 
     private autoMountDisk(): void {
+        // An explicit image overrides the default bundled CENTOS disk.
         // __dirname is server/dist/server/src/core in compiled output,
         // but server/src/core in ts-node. Try multiple paths.
         const candidates = [
             path.resolve(__dirname, '..', '..', '..', '..', 'disks', 'CENTOS_13.IMG'),
             path.resolve(__dirname, '..', '..', 'disks', 'CENTOS_13.IMG'),
         ];
-        let diskPath = candidates.find(p => fs.existsSync(p)) || candidates[0];
+        const requested = process.env.CENTURION_DISK_IMAGE;
+        const diskPath = requested ? path.resolve(requested) :
+            (candidates.find(p => fs.existsSync(p)) || candidates[0]);
         
         if (!fs.existsSync(diskPath)) {
+            if (requested) throw new Error(`Requested disk not found: ${diskPath}`);
             console.log(`[Core] Disk not found at: ${diskPath}`);
             return;
         }
         try {
-            const diskBuffer = fs.readFileSync(diskPath);
-            const arrayBuf = diskBuffer.buffer.slice(diskBuffer.byteOffset, diskBuffer.byteOffset + diskBuffer.length);
-            // Hawk disk stride depends on image size: 6651904 → 512, 5196800 → 400
-            const stride = diskBuffer.length === 6651904 ? 512 : diskBuffer.length === 5196800 ? 400 : 512;
-            const diskImage: DiskImage = {
-                type: 'hawk', filename: 'CENTOS_13.IMG', stride,
-                backing_data: arrayBuf, protect: false, data: new Uint8Array(arrayBuf),
-            };
-
-            // Mount on DSK2 unit 1 (Hawk disk)
-            const g = global as any;
-            const dsk2 = g.window?.io_dsk2;
-            if (dsk2?.units?.[1]) {
-                dsk2.units[1].image = diskImage;
-                // Reflect in the management stub so the disk manager shows it
-                const stub = this.diskControllers.find(c => c.type === 'dsk2');
-                if (stub && stub.units[1]) stub.units[1].image = diskImage;
-                console.log(`[Core] ✓ Auto-mounted CENTOS_13.IMG on DSK2 Unit 1 (stride ${stride})`);
-            } else {
-                console.log('[Core] DSK2 Unit 1 not available for auto-mount');
-            }
+            const image = this.mountHawkImage(path.basename(diskPath), fs.readFileSync(diskPath));
+            console.log(`[Core] ✓ Auto-mounted ${image.filename} on DSK2 Unit 1 (stride ${image.stride})`);
         } catch (err: any) {
+            if (requested) throw err;
             console.warn('[Core] Auto-mount failed:', err.message);
         }
+    }
+
+    getHawkImage(): DiskImage | null {
+        return this.diskControllers.find(controller => controller.type === 'dsk2')?.units[1]?.image ?? null;
+    }
+
+    mountHawkImage(filename: string, input: Uint8Array): DiskImage {
+        const stride = HAWK_STRIDES.get(input.byteLength);
+        if (stride === undefined) throw new Error('Expected a 400-byte or 512-byte stride Hawk image');
+        const unit = this.diskControllers.find(controller => controller.type === 'dsk2')?.units[1];
+        if (!unit) throw new Error('DSK2 unit 1 is unavailable');
+        const data = Uint8Array.from(input);
+        const image: DiskImage = {
+            type: 'hawk', filename, stride, protect: false, data, backing_data: data.buffer,
+        };
+        unit.set_disk(image);
+        return image;
     }
 
     private tryGetRealDisks(): StubDiskController[] {
@@ -436,6 +444,7 @@ export class CoreEmulator {
             console.log('[Core] ✓ Real MCCPU loaded from cen.js');
             return cpu;
         } catch (err: any) {
+            if (err instanceof FirmwareError) throw err;
             console.warn('[Core] Could not load real MCCPU:', err.message);
             console.warn('[Core] Falling back to StubCPU (emulation will not execute real instructions)');
             console.warn('[Core] To fix: ensure js/cen.js is compiled and accessible');
@@ -456,7 +465,20 @@ export class CoreEmulator {
         this._stateCallback = callback;
     }
 
-    private tickHardware(): void {
+    /** Notify a device during execution, before the next CPU steps. */
+    onHardwareTick(callback: (steps: number) => void): () => void {
+        this.hardwareTickListeners.push(callback);
+        return () => {
+            const index = this.hardwareTickListeners.indexOf(callback);
+            if (index >= 0) this.hardwareTickListeners.splice(index, 1);
+        };
+    }
+
+    private notifyHardwareTick(steps: number): void {
+        for (const listener of this.hardwareTickListeners) listener(steps);
+    }
+
+    private tickHardware(steps: number = 100): void {
         const g = global as any;
         // Match browser's run_hw_steps(100) — only run_hw devices, NOT run_hshw
         const hwList: any[] = g.window?.__runHW;
@@ -470,6 +492,7 @@ export class CoreEmulator {
             if (g.window?.io_dsk2?.run) try { g.window.io_dsk2.run(100); } catch {}
             if (g.window?.io_ffc?.run) try { g.window.io_ffc.run(100); } catch {}
         }
+        this.notifyHardwareTick(steps);
     }
 
     step(dbg: boolean = false): void {
@@ -478,6 +501,7 @@ export class CoreEmulator {
         if (g.window?.__runOnce !== undefined) g.window.__runOnce = true;
         const hwListStep: any[] = g.window?.__runHW || [];
         for (const hw of hwListStep) { try { hw.run(1); } catch {} }
+        this.notifyHardwareTick(1);
         this.cpu.step(dbg);
         if (this._stepCallback) this._stepCallback();
         if (this._stateCallback) this._stateCallback();
@@ -524,7 +548,7 @@ export class CoreEmulator {
                 // Regular step-by-step (browser: run_hw_steps(1) before each step)
                 for (let i = 0; i < rate && this._isRunning; i++) {
                     if (g.window?.__runOnce) g.window.__runOnce = true;
-                    this.tickHardware();  // BEFORE step (matching browser)
+                    this.tickHardware(1);  // BEFORE step (matching browser)
                     this.cpu.step(false);
                 }
             }

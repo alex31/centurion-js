@@ -43,6 +43,10 @@ APIs). These are modifications of the original CenRE build and are made
 explicit here for license transparency. The browser UI (`cen.html`) is the
 unpatched build.
 
+This software distribution takes its firmware and other historical data
+tables from a separate local input. The default source branches for the
+distribution contain the emulator software and table layout.
+
 ## Contact
 
 If any attribution above is incomplete or incorrect, please open an issue in

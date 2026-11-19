@@ -214,7 +214,7 @@ export interface ServerConfig {
         port: number;           // port for browser WebSocket connection
     };
     emulation: {
-        runRate: number;        // instructions per tick
+        runRate: number;        // simulation steps per tick
         autoStart: boolean;     // start running immediately
     };
 }
@@ -230,7 +230,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
         port: 42646,
     },
     emulation: {
-        runRate: 10000,
+        runRate: 100000,
         autoStart: false,
     },
 };
