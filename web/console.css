@@ -30,6 +30,10 @@ button:hover:not(:disabled) { background: #3b5142; }
 button:disabled { opacity: .46; cursor: default; }
 button:focus-visible, .screen:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .danger { color: #ffb9ab; border-color: #814a40; }
+.speed { margin-top: .75rem; color: var(--muted); }
+.speed label { display: inline-flex; align-items: center; gap: .35rem; }
+.speed input { margin: 0; accent-color: var(--green); }
+.speed input:checked + span { color: var(--green); }
 .registers {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr));
     gap: .55rem; margin: .8rem 0 0;

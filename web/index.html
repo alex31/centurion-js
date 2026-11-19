@@ -24,6 +24,10 @@
                     <button data-action="reset" disabled>Reset CPU</button>
                 </div>
             </div>
+            <div class="actions speed" role="radiogroup" aria-label="CPU speed">
+                <label><input type="radio" id="speed-realtime" name="speed" disabled> <span>Real time (5 MHz)</span></label>
+                <label><input type="radio" id="speed-maximum" name="speed" disabled> <span>Maximum speed</span></label>
+            </div>
             <dl id="registers" class="registers">
                 <div><dt>PC</dt><dd id="pc">—</dd></div>
                 <div><dt>Level</dt><dd id="level">—</dd></div>

@@ -6,6 +6,7 @@ const filePicker = document.getElementById('image-file');
 const loadButton = document.getElementById('load-image');
 const saveButton = document.getElementById('save-image');
 const buttons = Array.from(document.querySelectorAll('[data-action]'));
+const speeds = ['realtime', 'maximum'].map(mode => [mode, document.getElementById('speed-' + mode)]);
 const terminals = [0, 1].map(port => ({
     screen: document.getElementById('crt' + port),
     status: document.getElementById('crt' + port + '-status'),
@@ -86,8 +87,14 @@ function drawScreen(terminal, data) {
 
 function render() {
     const online = socket?.readyState === WebSocket.OPEN && !!state && !stopped;
+    const speed = state?.speed === 'realtime' ? 'Real time' : state?.speed === 'maximum' ? 'Maximum speed' :
+        state ? `${state.rate.toLocaleString()} steps/tick` : '';
     setText(connection, stopped ? 'Server stopped' : online ?
-        (state.running ? `Running · ${state.rate.toLocaleString()} steps/tick` : 'Paused') : 'Disconnected');
+        (state.running ? 'Running · ' + speed : 'Paused') : 'Disconnected');
+    for (const [mode, input] of speeds) {
+        input.checked = state?.speed === mode;
+        input.disabled = !online || busy;
+    }
     for (const button of buttons) {
         const action = button.dataset.action;
         button.disabled = !online || busy || (action === 'run' && state.running) ||
@@ -199,6 +206,18 @@ async function post(url, body) {
         busy = false;
         render();
     }
+}
+
+for (const [mode, input] of speeds) {
+    input.addEventListener('change', async () => {
+        if (!input.checked) return;
+        try {
+            await post('/api/control?action=speed&mode=' + mode);
+            report('');
+        } catch (error) {
+            report(error.message, true);
+        }
+    });
 }
 
 for (const button of buttons) {

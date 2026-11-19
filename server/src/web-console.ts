@@ -94,6 +94,7 @@ export class WebConsole {
             type: 'state',
             running: this.emulator.isRunning,
             rate: this.emulator.runRate,
+            speed: this.emulator.runSpeed,
             pc: cpu.pc, level: cpu.level, map: cpu.map, cc: cpu.cc, registers,
             disks: this.emulator.getAllDiskUnits().map(({label, image}) => ({
                 label,
@@ -173,7 +174,7 @@ export class WebConsole {
         }
         if (route === '/api/control' && req.method === 'POST') {
             req.resume();
-            this.control(res, url.searchParams.get('action'));
+            this.control(res, url.searchParams.get('action'), url.searchParams.get('mode'));
             return;
         }
         reply(res, 404, 'Not found');
@@ -246,10 +247,17 @@ export class WebConsole {
         res.end(data);
     }
 
-    private control(res: ServerResponse, action: string | null): void {
+    private control(res: ServerResponse, action: string | null, mode: string | null): void {
         switch (action) {
             case 'run': this.emulator.start(); break;
             case 'pause': this.emulator.stop(); break;
+            case 'speed':
+                if (mode !== 'realtime' && mode !== 'maximum') {
+                    reply(res, 400, 'Unknown speed mode');
+                    return;
+                }
+                this.emulator.setRunSpeed(mode);
+                break;
             case 'step':
                 if (this.emulator.isRunning) {
                     reply(res, 409, 'Pause the CPU before stepping');

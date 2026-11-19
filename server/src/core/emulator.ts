@@ -19,6 +19,7 @@ import {
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { performance } from 'node:perf_hooks';
 import { FirmwareError } from './firmware';
 
 // Lazy import of real CPU bridge to avoid loading polyfills at import time
@@ -31,6 +32,11 @@ let isRealCPULoaded: (() => boolean) | null = null;
 
 /** Supported byte counts for raw Hawk images. */
 export const HAWK_STRIDES = new Map([[5196800, 400], [6651904, 512]]);
+
+export type RunSpeed = 'realtime' | 'maximum';
+const TICK_MS = 20;
+const CPU6_STEPS_PER_MS = 5000;
+const HARDWARE_BATCH = 100;
 
 export function hex(value: number, digits: number = 4): string {
     let s = (value >>> 0).toString(16).toUpperCase();
@@ -309,9 +315,12 @@ export class CoreEmulator {
     memory: Memory;
     diskControllers: StubDiskController[];
     serialDevices: CharDevice[] = [];
-    private runInterval: NodeJS.Timeout | null = null;
+    private runTimer: NodeJS.Timeout | null = null;
     private _isRunning = false;
-    private _runRate = DEFAULT_CONFIG.emulation.runRate; // Mode 7: 100000 steps per tick
+    private _runRate = DEFAULT_CONFIG.emulation.runRate;
+    private _runSpeed: RunSpeed | 'custom' = 'maximum';
+    private lastTick = 0;
+    private cycleCredit = 0;
     private _stepCallback: (() => void) | null = null;
     private _stateCallback: (() => void) | null = null;
     private hardwareTickListeners: ((steps: number) => void)[] = [];
@@ -455,7 +464,25 @@ export class CoreEmulator {
     get isRunning(): boolean { return this._isRunning; }
 
     get runRate(): number { return this._runRate; }
-    set runRate(rate: number) { this._runRate = rate; }
+    set runRate(rate: number) {
+        this._runRate = rate;
+        this._runSpeed = 'custom';
+        this.resetTiming();
+    }
+
+    get runSpeed(): RunSpeed | 'custom' { return this._runSpeed; }
+
+    setRunSpeed(speed: RunSpeed): void {
+        if (speed === this._runSpeed) return;
+        this._runSpeed = speed;
+        this._runRate = DEFAULT_CONFIG.emulation.runRate;
+        this.resetTiming();
+    }
+
+    private resetTiming(): void {
+        this.lastTick = performance.now();
+        this.cycleCredit = 0;
+    }
 
     onStep(callback: () => void): void {
         this._stepCallback = callback;
@@ -485,12 +512,12 @@ export class CoreEmulator {
         if (hwList) {
             for (const dev of hwList) {
                 if (dev && typeof dev.run === 'function') {
-                    try { dev.run(100); } catch {}
+                    try { dev.run(steps); } catch {}
                 }
             }
         } else {
-            if (g.window?.io_dsk2?.run) try { g.window.io_dsk2.run(100); } catch {}
-            if (g.window?.io_ffc?.run) try { g.window.io_ffc.run(100); } catch {}
+            if (g.window?.io_dsk2?.run) try { g.window.io_dsk2.run(steps); } catch {}
+            if (g.window?.io_ffc?.run) try { g.window.io_ffc.run(steps); } catch {}
         }
         this.notifyHardwareTick(steps);
     }
@@ -510,17 +537,27 @@ export class CoreEmulator {
     start(): void {
         if (this._isRunning) return;
         this._isRunning = true;
+        this.resetTiming();
 
-        const rate = this._runRate;
-        const useHS = rate > 10000;
         const g = global as any;
         // Use the raw MCCPU stored by AMD loader for hsstep (wrapper lacks these)
         const rawCPU: any = g.window?.__preCPU || g.window?.cpu;
 
-        console.log(`[Core] Starting emulation at ${rate}/tick (${useHS ? 'fast batch' : 'regular'})`);
+        console.log(`[Core] Starting emulation (${this._runSpeed} speed)`);
 
-        this.runInterval = setInterval(() => {
+        const tick = () => {
+            this.runTimer = null;
             if (!this._isRunning) return;
+            const started = performance.now();
+            let rate = this._runRate;
+            if (this._runSpeed === 'realtime') {
+                // Bound catch-up after a delayed host tick, preserving fractional cycles.
+                const credit = Math.min(this.cycleCredit + (started - this.lastTick) * CPU6_STEPS_PER_MS,
+                    2 * TICK_MS * CPU6_STEPS_PER_MS);
+                rate = Math.floor(credit / HARDWARE_BATCH) * HARDWARE_BATCH;
+                this.cycleCredit = credit - rate;
+            }
+            this.lastTick = started;
 
             // Tick MUX TX first (matching browser: run_core calls mux_hw[i].run_tx() at start)
             const mux = g.window?.io_mux;
@@ -530,9 +567,9 @@ export class CoreEmulator {
                 }
             }
 
-            if (useHS && rawCPU && rawCPU.hspre) {
+            if (rate > 10000 && rawCPU?.hspre) {
                 // High-speed batch mode (matching browser run_core exactly)
-                const hsr = Math.floor(rate / 100);
+                const hsr = Math.floor(rate / HARDWARE_BATCH);
                 rawCPU.hspre();
                 for (let i = 0; i < hsr && this._isRunning; i++) {
                     if (g.window?.__runOnce) g.window.__runOnce = true;
@@ -558,14 +595,19 @@ export class CoreEmulator {
             if (ffc?.step) try { ffc.step(true); } catch {}
 
             if (this._stateCallback) this._stateCallback();
-        }, 20);
+            if (this._isRunning && !this.runTimer) {
+                const delay = this._runSpeed === 'maximum' ? 0 : Math.max(0, TICK_MS - (performance.now() - started));
+                this.runTimer = setTimeout(tick, delay);
+            }
+        };
+        this.runTimer = setTimeout(tick, this._runSpeed === 'maximum' ? 0 : TICK_MS);
     }
 
     stop(): void {
         this._isRunning = false;
-        if (this.runInterval) {
-            clearInterval(this.runInterval);
-            this.runInterval = null;
+        if (this.runTimer) {
+            clearTimeout(this.runTimer);
+            this.runTimer = null;
         }
         console.log('[Core] Emulation stopped');
     }
