@@ -27,7 +27,6 @@ import { DiskManagerSession, ManagedDisk } from './ports/disk-manager';
 import { EmuWebSocketServer } from './ws-server';
 import { WebConsole } from './web-console';
 import { WebTerminal } from './terminal/web-terminal';
-import { connectJclLoopback } from './terminal/jcl-loopback';
 import { createTelnetServer, TelnetSession } from './telnet/server';
 import * as fs from 'fs';
 import { ServerConfig, DEFAULT_CONFIG } from '../../shared/interfaces';
@@ -69,7 +68,6 @@ interface MuxTap {
 }
 const muxTaps: (MuxTap | null)[] = [];
 let rawSerial1: RawSerialServer | undefined;
-let jclLoopback: ReturnType<typeof connectJclLoopback> | undefined;
 {
     const mux = (global as any).window?.io_mux;
     if (mux?.muxports) {
@@ -96,12 +94,6 @@ let jclLoopback: ReturnType<typeof connectJclLoopback> | undefined;
         }
     } else {
         muxTaps.push(null, null);
-    }
-    if (process.env.CENTURION_JCL_LOOPBACK === '1') {
-        if (!mux?.muxports?.[1] || !mux?.muxports?.[2]) {
-            throw new Error('The JCL loopback requires CRT1 and CRT2');
-        }
-        jclLoopback = connectJclLoopback(mux.muxports[2], mux.muxports[1]);
     }
 }
 {
@@ -140,7 +132,6 @@ const wsServer = new EmuWebSocketServer(
             wsServer.broadcastState();
         },
         onReset: () => {
-            jclLoopback?.reset();
             emulator.reset();
             updateControlPanels();
         },
@@ -167,7 +158,6 @@ setInterval(() => {
 }, 20);
 
 function resetSystem(): void {
-    jclLoopback?.reset();
     for (const tap of muxTaps) {
         if (!tap) continue;
         tap.history.length = 0;
@@ -185,7 +175,6 @@ function updateDisplays(): void {
 
 function shutdownServer(): void {
     console.log('  Shutting down...');
-    jclLoopback?.close();
     emulator.stop();
     rl.close();
     process.exit(0);
