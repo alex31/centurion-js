@@ -19,6 +19,8 @@ externalized. [Upstream revision](https://github.com/billsargent/centurion/tree/
   The arrow keys honor VT100 application cursor mode, which BASIC `.EDIT`
   uses for horizontal movement.
   In that mode the browser also sends Page Up and Page Down for BASIC `.LIST`.
+- Set `CENTURION_JCL_LOOPBACK=1` to connect CRT2's transmitter to CRT1 for
+  the native CENTOS JCL examples. CRT1 stays accessible in the web console.
 - The web console switches between **Real time**, paced against the 5 MHz
   nominal CPU6 clock, and **Maximum speed**, which runs batches as soon as
   the host can schedule them. The host determines the attainable rate.
