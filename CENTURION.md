@@ -18,6 +18,7 @@ externalized. [Upstream revision](https://github.com/billsargent/centurion/tree/
   At an empty drive it opens the image picker, then boots the selected disk.
   The arrow keys honor VT100 application cursor mode, which BASIC `.EDIT`
   uses for horizontal movement.
+  In that mode the browser also sends Page Up and Page Down for BASIC `.LIST`.
 - The web console switches between **Real time**, paced against the 5 MHz
   nominal CPU6 clock, and **Maximum speed**, which runs batches as soon as
   the host can schedule them. The host determines the attainable rate.

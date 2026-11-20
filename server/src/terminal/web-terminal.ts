@@ -102,6 +102,10 @@ export class WebTerminal {
     key(key: string): void {
         if (!this.available()) throw new Error('CRT1 is reserved for raw serial');
         if (!this.output) throw new Error('The terminal is waiting for output from the CPU');
+        if (!this.steps.length && this.crt.applicationCursorKeys && /^\x1b\[[56]~$/.test(key)) {
+            this.enqueue(Array.from(key, ch => ch.charCodeAt(0)));
+            return;
+        }
         const code = terminalKey(key);
         if (code === undefined || (key.length === 1 && key.charCodeAt(0) > 127)) return;
         if (this.steps.length) {

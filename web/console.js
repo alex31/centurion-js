@@ -20,6 +20,7 @@ const arrowKeys = new Map([
 ]);
 const specialKeys = new Map([
     ['Enter', '\r'], ['Backspace', '\x7f'], ['Delete', '\x7f'], ['Escape', '\x1b'],
+    ['PageUp', '\x1b[5~'], ['PageDown', '\x1b[6~'],
 ]);
 let socket;
 let state;
