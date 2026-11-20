@@ -74,6 +74,7 @@ export class CenturionCRT {
     showCtrl = false;
     charEdit = INS_NONE;
     rts = true;
+    applicationCursorKeys = false;
 
     /**
      * Called when the host asks the terminal for its status
@@ -102,6 +103,7 @@ export class CenturionCRT {
         this.lineDraw = false;
         this.showCtrl = false;
         this.charEdit = INS_NONE;
+        this.applicationCursorKeys = false;
         this.escMode = EscMode.NORMAL;
         this.csiParameters = '';
         this.escExtra = 0;
@@ -173,7 +175,13 @@ export class CenturionCRT {
             return;
         }
         if (c === 27) { this.escMode = EscMode.ESC; return; }
-        if (c < 0x40 || c > 0x7e || this.csiParameters.startsWith('?')) return;
+        if (c < 0x40 || c > 0x7e) return;
+        if (this.csiParameters.startsWith('?')) {
+            if ((c === 104 || c === 108) && this.csiParameters.slice(1).split(';').includes('1')) {
+                this.applicationCursorKeys = c === 104; // DECCKM
+            }
+            return;
+        }
         const parameters = this.csiParameters.split(';').map(p => p ? parseInt(p, 10) : 0);
         const n = parameters[0] || 0;
         if (c === 72 || c === 102) { // CUP / HVP, one-based row;column

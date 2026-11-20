@@ -110,7 +110,11 @@ export class WebTerminal {
             this.input.length = 0;
             this.bootStatus = 'Boot cancelled';
         }
-        this.enqueue([code]);
+        if (this.crt.applicationCursorKeys && /^\x1b(?:\[|O)[A-D]$/.test(key)) {
+            this.enqueue([27, 79, key.charCodeAt(2)]); // ESC O + arrow
+        } else {
+            this.enqueue([code]);
+        }
     }
 
     paste(text: string): void {

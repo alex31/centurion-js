@@ -16,6 +16,8 @@ externalized. [Upstream revision](https://github.com/billsargent/centurion/tree/
   controls, image upload and download, and server shutdown. **Boot CENTOS**
   follows the ROM and CENTOS prompts using the browser's local date and time.
   At an empty drive it opens the image picker, then boots the selected disk.
+  The arrow keys honor VT100 application cursor mode, which BASIC `.EDIT`
+  uses for horizontal movement.
 - The web console switches between **Real time**, paced against the 5 MHz
   nominal CPU6 clock, and **Maximum speed**, which runs batches as soon as
   the host can schedule them. The host determines the attainable rate.
