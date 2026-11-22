@@ -31,11 +31,9 @@ export class WebTerminal {
     private deadline = 0;
     private bootStatus = '';
 
-    constructor(private port: TerminalPort,
-                private available: () => boolean,
-                private answerStatus: () => boolean) {
+    constructor(private port: TerminalPort, private available: () => boolean) {
         this.crt.onStatusMessage = bytes => {
-            if (this.answerStatus() && this.available() && this.input.length + bytes.length <= QUEUE_LIMIT) {
+            if (this.available() && this.input.length + bytes.length <= QUEUE_LIMIT) {
                 this.enqueue(bytes);
             }
         };

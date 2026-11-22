@@ -47,13 +47,6 @@ export class TelnetTerminal implements CharDevice {
             this.stop();
         };
 
-        // When the OS asks the terminal for its status (ESC 0x05), send the
-        // status message back into the MUX input stream.
-        this.crt.onStatusMessage = (bytes: number[]) => {
-            for (const b of bytes) this.inputBuf.push(b & 127);
-            this.flushInput();
-        };
-
         this.start();
         this.clearScreen();
     }

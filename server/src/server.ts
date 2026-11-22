@@ -58,6 +58,8 @@ const terminalSessions: TelnetTerminal[] = [];
 // history buffer, and replay it to any terminal that connects later.
 // Live output is forwarded to all connected terminal listeners; input
 // still flows the other way (terminal → MUX) via `term.bind_dev(muxPort)`.
+// The server's CRT answers status requests even with no clients. Telnet
+// sessions render the history and live output without answering again.
 // NOTE: we do NOT do `muxPort.bind_dev(term)` — that would double-deliver
 // output (once via this hook, once via the MUX's internal line forwarding).
 // ------------------------------------------------------------------
@@ -74,9 +76,7 @@ let rawSerial1: RawSerialServer | undefined;
         for (let i = 0; i < 2; i++) {
             const port = mux.muxports[i];
             if (!port) { muxTaps.push(null); continue; }
-            const web = new WebTerminal(port,
-                () => i === 0 || !rawSerial1?.connected,
-                () => dashboard.connected && !muxTaps[i]?.listeners.length);
+            const web = new WebTerminal(port, () => i === 0 || !rawSerial1?.connected);
             const tap: MuxTap = { history: [], listeners: [], web };
             muxTaps.push(tap);
             const origWD = port.write_data.bind(port);
