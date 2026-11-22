@@ -37,6 +37,7 @@ export type RunSpeed = 'realtime' | 'maximum';
 const TICK_MS = 20;
 const CPU6_STEPS_PER_MS = 5000;
 const HARDWARE_BATCH = 100;
+const SPEED_SAMPLE_MS = 1000;
 
 export function hex(value: number, digits: number = 4): string {
     let s = (value >>> 0).toString(16).toUpperCase();
@@ -321,6 +322,9 @@ export class CoreEmulator {
     private _runSpeed: RunSpeed | 'custom' = 'maximum';
     private lastTick = 0;
     private cycleCredit = 0;
+    private sampleStarted = 0;
+    private sampleMicrosteps = 0;
+    private _speedFactor: number | null = null;
     private _stepCallback: (() => void) | null = null;
     private _stateCallback: (() => void) | null = null;
     private hardwareTickListeners: ((steps: number) => void)[] = [];
@@ -471,6 +475,12 @@ export class CoreEmulator {
     }
 
     get runSpeed(): RunSpeed | 'custom' { return this._runSpeed; }
+    get speedFactor(): number | null { return this._speedFactor; }
+
+    private get rawCPU() {
+        const host = (global as any).window;
+        return host?.__preCPU || host?.cpu;
+    }
 
     setRunSpeed(speed: RunSpeed): void {
         if (speed === this._runSpeed) return;
@@ -482,6 +492,9 @@ export class CoreEmulator {
     private resetTiming(): void {
         this.lastTick = performance.now();
         this.cycleCredit = 0;
+        this.sampleStarted = this.lastTick;
+        this.sampleMicrosteps = this.rawCPU?.executedMicrosteps ?? 0;
+        this._speedFactor = null;
     }
 
     onStep(callback: () => void): void {
@@ -541,7 +554,7 @@ export class CoreEmulator {
 
         const g = global as any;
         // Use the raw MCCPU stored by AMD loader for hsstep (wrapper lacks these)
-        const rawCPU: any = g.window?.__preCPU || g.window?.cpu;
+        const rawCPU = this.rawCPU;
 
         console.log(`[Core] Starting emulation (${this._runSpeed} speed)`);
 
@@ -549,6 +562,15 @@ export class CoreEmulator {
             this.runTimer = null;
             if (!this._isRunning) return;
             const started = performance.now();
+            const elapsed = started - this.sampleStarted;
+            if (this._runSpeed === 'maximum' && elapsed >= SPEED_SAMPLE_MS) {
+                const microsteps = rawCPU?.executedMicrosteps;
+                if (typeof microsteps === 'number') {
+                    this._speedFactor = (microsteps - this.sampleMicrosteps) / (elapsed * CPU6_STEPS_PER_MS);
+                    this.sampleStarted = started;
+                    this.sampleMicrosteps = microsteps;
+                }
+            }
             let rate = this._runRate;
             if (this._runSpeed === 'realtime') {
                 // Bound catch-up after a delayed host tick, preserving fractional cycles.
@@ -605,6 +627,7 @@ export class CoreEmulator {
 
     stop(): void {
         this._isRunning = false;
+        this.resetTiming();
         if (this.runTimer) {
             clearTimeout(this.runTimer);
             this.runTimer = null;
@@ -614,6 +637,7 @@ export class CoreEmulator {
 
     reset(): void {
         this.cpu.reset();
+        this.resetTiming();
         // Guard RTC from firing during early boot (PC < 0x0600)
         const g = global as any;
         if (g.window) g.window.__rtcGuard = true;

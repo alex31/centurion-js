@@ -3223,6 +3223,7 @@ function loadcache() {
 	}
 }
 loadcache();
+let executed_microsteps = 0;
 class MCCPU implements ICCPU {
 	can_step = true;
 	trace = new Tracer();
@@ -3264,6 +3265,7 @@ class MCCPU implements ICCPU {
 		mempt_set();
 	}
 	get page_ram() { return pagetb; }
+	get executedMicrosteps() { return executed_microsteps; }
 	change_virtual_break(old_f:null | number | BreakFunction, new_f:BreakFunction) {
 		let o;
 		if(typeof new_f != 'function') {
@@ -4158,6 +4160,7 @@ function hsstep() {
 	}
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 
+	++executed_microsteps;
 	run_hshw_steps();
 	run_once = false;
 }
@@ -4587,6 +4590,7 @@ function step(debug_output:boolean = false) {
 	aluc.step(mci.aluc_d, mci.aluc_b);
 	mcpc = ((s2.output << 8) | (s1.output << 4) | (s0.output)) & 0x7ff;
 
+	++executed_microsteps;
 	run_hshw_steps();
 
 	run_once = false;

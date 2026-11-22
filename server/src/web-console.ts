@@ -95,6 +95,7 @@ export class WebConsole {
             running: this.emulator.isRunning,
             rate: this.emulator.runRate,
             speed: this.emulator.runSpeed,
+            speedFactor: this.emulator.speedFactor,
             pc: cpu.pc, level: cpu.level, map: cpu.map, cc: cpu.cc, registers,
             disks: this.emulator.getAllDiskUnits().map(({label, image}) => ({
                 label,

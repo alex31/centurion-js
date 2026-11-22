@@ -90,8 +90,12 @@ function render() {
     const online = socket?.readyState === WebSocket.OPEN && !!state && !stopped;
     const speed = state?.speed === 'realtime' ? 'Real time' : state?.speed === 'maximum' ? 'Maximum speed' :
         state ? `${state.rate.toLocaleString()} steps/tick` : '';
+    const factor = state?.speed === 'maximum' && Number.isFinite(state.speedFactor)
+        ? ' · ' + state.speedFactor.toLocaleString(undefined,
+            {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '×'
+        : '';
     setText(connection, stopped ? 'Server stopped' : online ?
-        (state.running ? 'Running · ' + speed : 'Paused') : 'Disconnected');
+        (state.running ? 'Running · ' + speed + factor : 'Paused') : 'Disconnected');
     for (const [mode, input] of speeds) {
         input.checked = state?.speed === mode;
         input.disabled = !online || busy;
