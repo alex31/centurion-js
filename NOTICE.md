@@ -15,37 +15,28 @@ with any redistribution of this software.
 
 ## Copyright & origin
 
-- The **CenRE emulator core and browser UI** — `src/cen.ts`, `js/cen.js`,
-  `js/cen.js.map`, `src/monarch.ts`, `js/monarch.js`, `js/monarch.js.map`,
-  `cen.html`, `cen-server.html`, `main.css`, `seq.svg`, and the shared
-  `CharDevice`/emulator interfaces in `shared/` — are derived from **CenRE
-  ("Centurion RE"), Copyright (c) 2023 Meisaka Yukara**, licensed under the
-  CenRE License (`LICENSE.txt`).
-- The **server components** — `server/` (Node.js Telnet/WebSocket server,
-  in-process emulation core, runtime patches, test harnesses) and `docs/` —
-  are additional original work added to this repository.
+- The microcoded CPU, peripherals and original terminal implementation in
+  `src/cen.ts` derive from CenRE, Copyright (c) 2023 Meisaka Yukara.
+- The Telnet/WebSocket server and Node.js bridge in `server/` derive from
+  billsargent's server adaptation. This fork supplies a browser console in
+  `web/`, builds the JavaScript core from TypeScript and loads firmware
+  tables from a separate local pack.
 
 No claim is made to have written the original CenRE software, and nothing here
 implies endorsement by the copyright holder (CenRE License condition 5).
 
 ## Third-party components
 
-| File | Component | License |
-|---|---|---|
-| `js/require.js` | RequireJS 2.3.6 (AMD loader) | MIT or BSD-3-Clause |
-| `js/monarch.js` | Monarch/assembler language definition (part of CenRE) | CenRE License |
+The build uses TypeScript to compile the sources. The server uses the
+`ws` package for WebSocket connections. The lockfile records the versions
+and the packages carry their own license notices. [Dependencies](package.json)
 
 ## Runtime patches (modified code)
 
-`server/src/core/amd-loader.ts` loads the compiled `js/cen.js` and applies
-string-level runtime patches (sense switches, polyfills, exposing internal
-APIs). These are modifications of the original CenRE build and are made
-explicit here for license transparency. The browser UI (`cen.html`) is the
-unpatched build.
-
-This software distribution takes its firmware and other historical data
-tables from a separate local input. The default source branches for the
-distribution contain the emulator software and table layout.
+`server/src/core/amd-loader.ts` loads the generated CenRE core and applies
+runtime patches for headless execution, sense switches and access to
+emulated devices. The distribution's firmware import uses the table names
+and sizes in the [firmware specification](src/firmware-spec.json).
 
 ## Contact
 

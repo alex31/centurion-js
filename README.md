@@ -1,83 +1,27 @@
-# Centurion CPU-6 Emulator
+# Centurion CPU-6 JavaScript emulator
 
-An emulator for the **Centurion CPU-6** computer, with a Telnet/WebSocket
-server that runs the CPU-6, loads **Hawk** and **Finch** disk packs and disk
-images, and drives its native **Centurion CRT** terminals.
+This fork runs the microcoded CPU6, Hawk and Finch drives, and two Centurion CRTs in Node.js. It derives from Meisaka Yukara's CenRE and billsargent's server adaptation. [License](LICENSE.txt) · [Attribution](NOTICE.md)
 
-Built on the [CenRE](LICENSE.txt) browser emulator (Meisaka Yukara, ©2023) and
-wrapped in a headless Node.js core — no browser required.
+## Build and boot CENTOS
 
-## Highlights
+From the root of the Centurion SDCC distribution, prepare the local firmware pack and disk image using the distribution's build instructions. The JavaScript build requires Node.js 20 or newer and npm. [Distribution build guide](https://github.com/alex31/centurion_centos6_sdcc#build)
 
-- **Disk packs & disk images** — mount Hawk (`.IMG`) and Finch (`.FFI`) disk
-  packs and images into drives via the disk manager (2326) or the browser UI;
-  format and stride are auto-detected from the file.
-- **Native terminal emulation** — the server speaks the Centurion CRT protocol
-  (cursor addressing, attributes, protected fields, insert/delete), so
-  formatted OS screens (`.STA`, editors, forms) render correctly.
-- **Telnet + WebSocket server** — control panel (2323), terminals (2324/2325),
-  disk manager (2326), and a rich browser frontend (`cen.html`).
-- **Documentation** — the reference set in [`docs/`](docs/README.md) covers
-  booting, CENTOS commands, CPL, the APLIB library, and the DEBUG utility.
-
-## Quick start
-
-```bash
-cd server
-npm install
-npm run build
-npm start
+```sh
+make emulator
+run/centurion-system-js /path/to/CENTOS_13.IMG
 ```
 
-Then connect and load a disk:
+If you built the distribution's application image with `./dobuild`, launch `run/centurion-system-js` without an argument to mount it. Open the console and click **Boot CENTOS** on CRT0. **Load image** accepts a Hawk image for DSK2 unit 1. **Save image** downloads a copy with guest writes. [Local web console](http://127.0.0.1:42646/)
 
-- **Disk manager** — `telnet localhost 2326`: `[L]` load a disk image into a
-  drive, `[N]` create a new blank disk, `[E]` export, `[I]` info, or `[0-7]`
-  quick-mount from `server/disks/`.
-- **Control panel** — `telnet localhost 2323`: front-panel registers, LEDs,
-  and run/halt/step control.
-- **Terminal** — `telnet localhost 2324`: CRT 0, the native Centurion CRT.
+## Services
 
-Drop your own disk images (Hawk `.IMG` / Finch `.FFI`) into `server/disks/`.
-If you have an OS disk image, [`docs/BOOTING-CENTOS.md`](docs/BOOTING-CENTOS.md)
-documents the full boot procedure.
+| Port | Interface | Function |
+| --- | --- | --- |
+| 2323 | Telnet | Control panel with registers and run, halt and step controls |
+| 2324 | Telnet | CRT0 |
+| 2325 | Telnet | CRT1 |
+| 2326 | Telnet | Disk manager for Hawk and Finch drives |
+| 2327 | Raw serial | MUX channel 1 |
+| 42646 | HTTP and WebSocket | Browser console, both CRTs and Hawk image transfer |
 
-## Ports & services
-
-| Port | Service | Protocol | What it's for |
-|---|---|---|---|
-| 2323 | Control panel / console | Telnet | Front-panel registers, LEDs, run/halt/step control |
-| 2324 | Terminal 0 (CRT 0) | Telnet | Native Centurion CRT terminal |
-| 2325 | Terminal 1 (CRT 1) | Telnet | Second CRT terminal |
-| 2326 | Disk manager | Telnet | Load/create/export disk images |
-| 42646 | Browser UI | WebSocket | Rich frontend (open `cen.html` → Remote, or `cen-server.html`) |
-
-The server console (`npm start` terminal) accepts `r`(un) `h`(alt) `s`(tep)
-`q`(uit) and `reset`.
-
-## Documentation
-
-| Doc | Covers |
-|---|---|
-| [`docs/BOOTING-CENTOS.md`](docs/BOOTING-CENTOS.md) | Booting CENTOS step by step (requires your own OS disk image) |
-| [`docs/CENTOS-COMMANDS.md`](docs/CENTOS-COMMANDS.md) | CENTOS command reference |
-| [`docs/CPL-REFERENCE.md`](docs/CPL-REFERENCE.md) | CPL programming language |
-| [`docs/APLIB-REFERENCE.md`](docs/APLIB-REFERENCE.md) | APLIB application library |
-| [`docs/DEBUG-REFERENCE.md`](docs/DEBUG-REFERENCE.md) | DEBUG runtime debugger |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Codebase architecture |
-| [`docs/HARNESS.md`](docs/HARNESS.md) | Driving the OS programmatically |
-
-## Included data
-
-- **Disk images** — `FINCH2.BIN` and `TORI.FFI` data disk packs are committed
-  under `server/disks/` (see `server/disks/README.md`). Add your own Hawk
-  (`.IMG`) or Finch (`.FFI`) disk images to that folder to load them.
-- **CPU6 Programmer's Manual** — the OCR'd full manuals (`01_UTILITY` …
-  `05_SYSGEN` + cover) are committed under `CPU6 Programmer Manual/`. The raw
-  pre-OCR scans in `Original Scans/` are excluded (redundant, ~160 MB).
-
-## License & attribution
-
-This is a modified/derived work of **CenRE** (Copyright © 2023 Meisaka Yukara)
-and is distributed under the **CenRE License** — see [`LICENSE.txt`](LICENSE.txt)
-and [`NOTICE.md`](NOTICE.md).
+The server's local command line accepts `run`, `halt`, `step`, `reset` and `quit`. At CRT0 over Telnet, enter `H1` at the ROM's `D=` prompt, accept system disk 1, then enter the date and time. [CENTOS boot and application commands](https://github.com/alex31/centurion_centos6_sdcc#start-a-centos-session)

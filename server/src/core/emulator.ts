@@ -670,13 +670,12 @@ export class CoreEmulator {
     }
 
     /** Get all disk units for management */
-    getAllDiskUnits(): { container: DiskContainer; image: DiskImage | null; label: string; type: 'dsk2' | 'finch'; unitIndex: number }[] {
-        const result: { container: DiskContainer; image: DiskImage | null; label: string; type: 'dsk2' | 'finch'; unitIndex: number }[] = [];
+    getAllDiskUnits() {
+        const result = [];
         for (const ctl of this.diskControllers) {
             for (let i = 0; i < ctl.units.length; i++) {
                 result.push({
                     container: ctl.units[i],
-                    image: ctl.units[i].image,
                     label: `${ctl.type.toUpperCase()} Unit ${i}`,
                     type: ctl.type,
                     unitIndex: i,

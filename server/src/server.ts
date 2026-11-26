@@ -23,7 +23,7 @@ import { CoreEmulator } from './core/emulator';
 import { ControlPanelSession } from './ports/control-panel';
 import { TelnetTerminal } from './ports/terminal';
 import { RawSerialServer } from './ports/raw-serial';
-import { DiskManagerSession, ManagedDisk } from './ports/disk-manager';
+import { DiskManagerSession } from './ports/disk-manager';
 import { EmuWebSocketServer } from './ws-server';
 import { WebConsole } from './web-console';
 import { WebTerminal } from './terminal/web-terminal';
@@ -288,15 +288,7 @@ createTelnetServer(
 createTelnetServer(
     config.telnet.diskManager,
     (session: TelnetSession) => {
-        const rawUnits = emulator.getAllDiskUnits();
-        const diskUnits: ManagedDisk[] = rawUnits.map(u => ({
-            container: u.container,
-            image: u.image,
-            label: u.label,
-            type: u.type,
-            unitIndex: u.unitIndex,
-        }));
-        new DiskManagerSession(diskUnits, session, './disks');
+        new DiskManagerSession(emulator.getAllDiskUnits(), session, './disks');
     },
     'DiskManager'
 );

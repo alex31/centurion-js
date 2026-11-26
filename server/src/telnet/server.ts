@@ -43,6 +43,11 @@ class TelnetSessionImpl implements TelnetSession {
     cols: number = 80;
     rows: number = 24;
     private buffer: string = '';
+    private state: 'data' | 'command' | 'option' | 'suboption' | 'subdata' | 'subcommand' = 'data';
+    private command = 0;
+    private suboption = 0;
+    private subdata: number[] = [];
+    private afterCR = false;
 
     constructor(socket: net.Socket) {
         this.socket = socket;
@@ -74,94 +79,74 @@ class TelnetSessionImpl implements TelnetSession {
     }
 
     private handleNegotiation(cmd: number, opt: number): void {
-        switch (cmd) {
-            case WILL:
-                // Client wants to use this option
-                if (opt === OPT_ECHO || opt === OPT_SUPPRESS_GA) {
-                    this.sendNegotiation(DO, opt);
-                } else if (opt === OPT_TERMTYPE || opt === OPT_NAWS) {
-                    this.sendNegotiation(DO, opt);
-                } else {
-                    this.sendNegotiation(DONT, opt);
-                }
-                break;
-            case WONT:
-                this.sendNegotiation(DONT, opt);
-                break;
-            case DO:
-                // Client wants us to use this option
-                if (opt === OPT_ECHO) {
-                    this.sendNegotiation(WILL, opt);
-                } else if (opt === OPT_SUPPRESS_GA) {
-                    this.sendNegotiation(WILL, opt);
-                } else {
-                    this.sendNegotiation(WONT, opt);
-                }
-                break;
-            case DONT:
-                this.sendNegotiation(WONT, opt);
-                break;
+        // The greeting has already offered ECHO/SGA and requested TTYPE/NAWS.
+        if (cmd === WILL) {
+            if (opt === OPT_TERMTYPE)
+                this.socket.write(Buffer.from([IAC, SB, opt, 1, IAC, SE]));
+            else if (opt !== OPT_NAWS)
+                this.sendNegotiation(opt === OPT_SUPPRESS_GA ? DO : DONT, opt);
+        } else if (cmd === DO && opt !== OPT_ECHO && opt !== OPT_SUPPRESS_GA) {
+            this.sendNegotiation(WONT, opt);
         }
     }
 
-    private handleSubnegotiation(opt: number, data: Buffer): void {
-        if (opt === OPT_TERMTYPE && data[0] === 1) {
-            // TERMTYPE SEND response
-            this.termType = data.slice(1).toString('ascii').toLowerCase();
-        } else if (opt === OPT_NAWS) {
-            // Window size: cols (2 bytes), rows (2 bytes)
-            if (data.length >= 4) {
-                this.cols = (data[0] << 8) | data[1];
-                this.rows = (data[2] << 8) | data[3];
-            }
+    private finishSubnegotiation(): void {
+        const data = this.subdata;
+        if (this.suboption === OPT_TERMTYPE && data[0] === 0) {
+            this.termType = String.fromCharCode(...data.slice(1).filter(c => c >= 32 && c < 127)).toLowerCase();
+        } else if (this.suboption === OPT_NAWS && data.length === 4) {
+            this.cols = ((data[0] << 8) | data[1]) || this.cols;
+            this.rows = ((data[2] << 8) | data[3]) || this.rows;
         }
+    }
+
+    private dataByte(b: number): void {
+        const afterCR = this.afterCR;
+        this.afterCR = b === 13;
+        if (afterCR && (b === 10 || b === 0)) return;
+        if (b === 127 || b === 8) this.handleKey('\x7f');
+        else if (b >= 32 || b === 9 || b === 27 || b === 13 || b === 10 || b === 3 || b === 4 || b === 25)
+            this.handleKey(String.fromCharCode(b));
     }
 
     private handleData(data: Buffer): void {
-        let i = 0;
-        while (i < data.length) {
-            const b = data[i++];
-            if (b === IAC && i < data.length) {
-                const cmd = data[i++];
-                if (cmd === IAC) {
-                    // Escaped IAC byte
-                    this.buffer += String.fromCharCode(IAC);
-                } else if (cmd === SB) {
-                    // Subnegotiation - extract option and data until IAC SE
-                    if (i >= data.length) break;
-                    const opt = data[i++];
-                    const subStart = i;
-                    while (i < data.length - 1) {
-                        if (data[i] === IAC && data[i + 1] === SE) {
-                            break;
-                        }
-                        i++;
+        for (const b of data) {
+            switch (this.state) {
+                case 'data':
+                    if (b === IAC) this.state = 'command';
+                    else this.dataByte(b);
+                    break;
+                case 'command':
+                    this.state = 'data';
+                    if (b === IAC) this.dataByte(b);
+                    else if (b === SB) this.state = 'suboption';
+                    else if (b >= WILL && b <= DONT) {
+                        this.command = b;
+                        this.state = 'option';
                     }
-                    const subData = data.slice(subStart, i);
-                    i += 2; // skip IAC SE
-                    this.handleSubnegotiation(opt, subData);
-                } else if (cmd === WILL || cmd === WONT || cmd === DO || cmd === DONT) {
-                    if (i < data.length) {
-                        this.handleNegotiation(cmd, data[i++]);
+                    break;
+                case 'option':
+                    this.handleNegotiation(this.command, b);
+                    this.state = 'data';
+                    break;
+                case 'suboption':
+                    this.suboption = b;
+                    this.subdata.length = 0;
+                    this.state = 'subdata';
+                    break;
+                case 'subdata':
+                    if (b === IAC) this.state = 'subcommand';
+                    else if (this.subdata.length < 64) this.subdata.push(b);
+                    break;
+                case 'subcommand':
+                    if (b === SE) {
+                        this.finishSubnegotiation();
+                        this.state = 'data';
+                    } else {
+                        if (b === IAC && this.subdata.length < 64) this.subdata.push(b);
+                        this.state = 'subdata';
                     }
-                }
-                // Other IAC commands like NOP, AYT, etc. are ignored
-            } else if (b === 127 || b === 8) {
-                // Backspace
-                this.handleKey('\x7f');
-            } else if (b === 13) {
-                // CR - handle as Enter. Skip following LF to avoid double-CR.
-                this.handleKey('\r');
-                // Peek ahead: if next byte is LF, skip it
-                if (i < data.length && data[i] === 10) {
-                    i++; // consume LF
-                }
-            } else if (b === 10) {
-                // LF alone
-                this.handleKey('\n');
-            } else if (b >= 32 || b === 9 || b === 27 || b === 3 || b === 4 || b === 25) {
-                // Printable, tab, escape, CENTOS break and BASIC editor controls
-                this.handleKey(String.fromCharCode(b));
+                    break;
             }
         }
     }
@@ -228,11 +213,12 @@ export function createTelnetServer(
         session.write(Buffer.from([IAC, DO, OPT_NAWS]));
 
         // Give the client a moment to negotiate, then start
-        setTimeout(() => {
+        const negotiated = setTimeout(() => {
             factory(session);
         }, 100);
 
         socket.on('close', () => {
+            clearTimeout(negotiated);
             console.log(`[${label}] Telnet session closed`);
             if (session.onClose) session.onClose();
         });
