@@ -840,10 +840,10 @@ const vtx_quadidx = [0,1,2,2,1,3];
 let vt_font_bmp: ImageBitmap | undefined;
 let vt_use_gl = true;
 let vt_use_offscreen = true;
-if ((window.WebGLRenderingContext == undefined) || localStorage.getItem('nogl') != null) {
+if ((window.WebGLRenderingContext == undefined) || localStorage?.getItem('nogl') != null) {
 	vt_use_gl = false;
 }
-if ((window.OffscreenCanvas == undefined) || localStorage.getItem('nooffscreen') != null) {
+if ((window.OffscreenCanvas == undefined) || localStorage?.getItem('nooffscreen') != null) {
 	vt_use_offscreen = false;
 }
 let vt_force_redraw = false;
@@ -7877,8 +7877,7 @@ class NullROM implements MemAccess {
 function loadbin(mem:MemAccess, v:Uint8Array, addrfn?:number|AddressTransform):MemAccess {
 	const l = v.length;
 	if (addrfn === undefined || typeof addrfn == 'number') {
-		let a = 0;
-		if(addrfn !== undefined) a = addrfn;
+		let a = typeof addrfn === 'number' ? addrfn : 0;
 		for (; a < l; a++) {
 			mem.writemeta(a, v[a]);
 		}
@@ -11372,7 +11371,7 @@ function brload(buffer:ArrayBuffer | DataView, into?:BRValue):BRValue {
 				if((qh == 0) || (qh >= 1048576)) throw new Error();
 				return qh * 4294967296 + ql;
 			}
-			if(v == 31 && m == 4) return undefined;
+			if(v == 31 && (m == 4 || m == 5)) return undefined;
 			throw new Error();
 		}
 		switch(m) {
@@ -11381,32 +11380,10 @@ function brload(buffer:ArrayBuffer | DataView, into?:BRValue):BRValue {
 		case 2: throw new Error();
 		case 3: {
 			const len = read_enc() as number;
-			let s = '';
-			for(let i = 0; i < len; i++) {
-				if(offset+1 > limit) throw new Error();
-				const c = dv.getUint8(offset++);
-				if(c < 128) s += String.fromCharCode(c);
-				else if((c & 248)==240) { // 3
-					if(offset+3 > limit) throw new Error();
-					const c2 = dv.getUint8(offset++); if((c2 & 192)!=128) throw new Error();
-					const c1 = dv.getUint8(offset++); if((c1 & 192)!=128) throw new Error();
-					const c0 = dv.getUint8(offset++); if((c0 & 192)!=128) throw new Error();
-					s += String.fromCharCode(((c&31)<<18) | ((c2&63)<<12) | ((c1&63)<<6) | (c0&63));
-				}
-				else if((c & 240)==224) { // 2
-					if(offset+2 > limit) throw new Error();
-					const c1 = dv.getUint8(offset++); if((c1 & 192)!=128) throw new Error();
-					const c0 = dv.getUint8(offset++); if((c0 & 192)!=128) throw new Error();
-					s += String.fromCharCode(((c&31)<<12) | ((c1&63)<<6) | (c0&63));
-				}
-				else if((c & 224)==192) { // 1
-					if(offset+1 > limit) throw new Error();
-					const c0 = dv.getUint8(offset++); if((c0 & 192)!=128) throw new Error();
-					s += String.fromCharCode(((c&31)<<6) | (c0&63));
-				}
-				else throw new Error();
-			}
-			return s;
+			if (offset + len > limit) throw new Error('Truncated text');
+			const bytes = new Uint8Array(dv.buffer, dv.byteOffset + offset, len);
+			offset += len;
+			return new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes);
 		}
 		case 4: {
 			const len = read_enc();
@@ -11415,7 +11392,7 @@ function brload(buffer:ArrayBuffer | DataView, into?:BRValue):BRValue {
 					throw new Error();
 				}
 			}
-			const a:BRValue[] = (into !== undefined) ? into:[];
+			const a:BRValue[] = Array.isArray(into) ? into : [];
 			if(len == undefined) {
 				let i = 0;
 				while(dv.getUint8(offset) != 0xff) {
@@ -11437,25 +11414,22 @@ function brload(buffer:ArrayBuffer | DataView, into?:BRValue):BRValue {
 					|| typeof into != 'object'
 					|| Array.isArray(into)) throw new Error();
 			}
-			const o:{[index:string|number]:BRValue} =
-				(into !== undefined) ? into : {};
+			const o:BRObject = into && typeof into === 'object' && !Array.isArray(into) ? into : {};
+			const read_field = () => {
+				const k = brload_rec(depth + 1);
+				if (typeof k !== 'number' && typeof k !== 'string') throw new Error();
+				const field = brload_rec(depth + 1, Object.hasOwn(o, k) ? o[k] : undefined);
+				Object.defineProperty(o, k, {value: field, enumerable: true, writable: true, configurable: true});
+			};
 			if(len == undefined) {
 				while(dv.getUint8(offset) != 0xff) {
-					const k = brload_rec(depth+1);
-					if(typeof k == 'number' || typeof k == 'string') {
-						const v = brload_rec(depth+1, o[k]);
-						o[k] = v;
-					} else throw new Error();
+					read_field();
 				}
 				offset++;
 				return o;
 			}
 			for(let i = 0; i < len; i++) {
-				const k = brload_rec(depth+1);
-				if(typeof k == 'number' || typeof k == 'string') {
-					const v = brload_rec(depth+1, o[k]);
-					o[k] = v;
-				} else throw new Error();
+				read_field();
 			}
 			return o;
 		}
@@ -11553,22 +11527,18 @@ function brsave(value:BRValue) {
 			return;
 		} else if(typeof value == 'string') {
 			brscratch[0] = 96;
-			let eslen = 0;
-			for(let c of value) {
-				if(c.codePointAt(0) as number > 127) throw new Error();
-				eslen++;
-			}
-			const dlen = brenc_int(eslen);
+			const encoded = new TextEncoder().encode(value);
+			const dlen = brenc_int(encoded.length);
 			for(let i = 0; i < dlen; i++) {
 				ds += String.fromCharCode(brscratch[i]);
 			}
-			for(let c of value) {
-				ds += c;
+			for(const byte of encoded) {
+				ds += String.fromCharCode(byte);
 			}
 			return;
 		} else if(typeof value == 'object') {
 			if(Array.isArray(value)) {
-				let is_b = value.length > 1;
+				let is_b = value.length === 8;
 				let b_val = 0;
 				for(let i = 0; is_b && i < value.length; i++) {
 					if(value[i] === true) {
@@ -11578,7 +11548,7 @@ function brsave(value:BRValue) {
 						break;
 					}
 				}
-				if(is_b && value.length < 8) {
+				if(is_b) {
 					ds += String.fromCharCode(198);
 					brsave_rec(b_val);
 					return;
@@ -11599,7 +11569,7 @@ function brsave(value:BRValue) {
 					ds += String.fromCharCode(brscratch[i]);
 				}
 				for(let i = 0; i < kv.length; i++) {
-					if(/^0|(?:[1-9][0-9]*)$/.test(kv[i][0])) {
+					if(/^(?:0|[1-9][0-9]*)$/.test(kv[i][0]) && Number(kv[i][0]) <= 0xffffffff) {
 						const kn = parseInt(kv[i][0]);
 						brsave_rec(kn);
 					} else {
@@ -11668,12 +11638,18 @@ function from_csr(s:string):ArrayBuffer {
 		v = v * 95 + sv2;
 		v = v * 95 + sv1;
 		v = v * 95 + sv0;
-		if(v > 4294967295) v -= 4294967296;
+		let bytes = 4;
+		if (v >= 4294967296) {
+			if (i + 5 !== limit) throw new Error('Unexpected partial block');
+			if (v >= 4328521728) { bytes = 3; v -= 4328521728; }
+			else if (v >= 4311744512) { bytes = 2; v -= 4311744512; }
+			else { bytes = 1; v -= 4294967296; }
+		}
 		dv.setUint32(o, v, true);
-		o+=4;
+		o += bytes;
 		i+=5;
 	}
-	return buffer;
+	return o === buffer.byteLength ? buffer : buffer.slice(0, o);
 }
 
 function config_load() {
@@ -11934,26 +11910,25 @@ window.to_csr = to_csr;
 //@ts-ignore
 window.from_csr = from_csr;
 function rtd() {
-	config_save();
-	let d:Uint8Array = brsave(CONFIG_LL);
-	let csr = to_csr(d.buffer);
 	try {
-		localStorage.setItem('cencfg', csr);
+		if (!localStorage) return;
+		config_save();
+		localStorage.setItem('cencfg', to_csr(brsave(CONFIG_LL).buffer));
 	} catch(ex) {
-		console.warn('unable to save config string:',[csr]);
+		console.warn('unable to save configuration:', ex);
 	}
 }
 
 function config_initialize() {
-	let lsv = localStorage.getItem('cencfg');
-	if(lsv == null) return;
 	try {
+		const lsv = localStorage?.getItem('cencfg');
+		if (lsv == null) return;
 		const bv = new Uint8Array(from_csr(lsv));
 		console.log('loading config');
 		brload(bv.buffer, CONFIG_LL);
 		config_load();
 	} catch(ex) {
-		console.warn('unable to load config:',[lsv],ex);
+		console.warn('unable to load config:', ex);
 	}
 }
 config_initialize();

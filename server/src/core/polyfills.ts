@@ -60,7 +60,7 @@ export function installPolyfills(): void {
 
     safeSet(g, "window", g);
     safeSet(g, "self", g);
-    safeSet(g, "localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, get length() { return 0; }, key: () => null });
+    safeSet(g, "localStorage", null);
     safeSet(g, "sessionStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, get length() { return 0; }, key: () => null });
 
     // ------------------------------------------------------------------

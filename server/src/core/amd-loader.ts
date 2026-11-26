@@ -180,14 +180,4 @@ export function loadAMDModule(absolutePath: string): void {
         }
         console.log('[AMD] Added dummy I/O devices for NIO probe');
     } catch(e) { /* ignore */ }
-
-    // Suppress async crashes from config save (brsave_rec tries to serialize BH)
-    process.on('uncaughtException', (e: Error) => {
-        if (e.message === '' || (e.stack || '').includes('brsave')) {
-            // Config save to localStorage with black hole data — harmless
-            return;
-        }
-        throw e;
-    });
 }
-
