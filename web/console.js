@@ -27,6 +27,9 @@ let state;
 let stopped = false;
 let busy = false;
 let bootFromImage = null;
+let reconnecting = false;
+let retryDelay = 100;
+let retryTimer;
 
 function setText(element, text) {
     if (element.textContent !== text) element.textContent = text;
@@ -95,7 +98,8 @@ function render() {
             {minimumFractionDigits: 1, maximumFractionDigits: 1}) + '×'
         : '';
     setText(connection, stopped ? 'Server stopped' : online ?
-        (state.running ? 'Running · ' + speed + factor : 'Paused') : 'Disconnected');
+        (state.running ? 'Running · ' + speed + factor : 'Paused') :
+        reconnecting ? 'Reconnecting' : 'Connecting');
     for (const [mode, input] of speeds) {
         input.checked = state?.speed === mode;
         input.disabled = !online || busy;
@@ -135,12 +139,21 @@ function render() {
     }
 }
 
+function retryConnection() {
+    if (retryTimer === undefined) return;
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+    if (!stopped) connect();
+}
+
 function connect() {
     socket = new WebSocket('ws://' + location.host + '/console');
     socket.onmessage = event => {
         const message = JSON.parse(event.data);
         if (message.type === 'state') {
             state = message;
+            reconnecting = false;
+            retryDelay = 100;
             render();
         } else if (message.type === 'error') {
             report(message.message, true);
@@ -148,10 +161,19 @@ function connect() {
     };
     socket.onclose = () => {
         state = undefined;
+        reconnecting = true;
         render();
-        if (!stopped) setTimeout(() => { if (!stopped) connect(); }, 1500);
+        if (!stopped) {
+            retryTimer = setTimeout(retryConnection, retryDelay);
+            retryDelay = Math.min(retryDelay * 2, 500);
+        }
     };
 }
+
+window.addEventListener('focus', retryConnection);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) retryConnection();
+});
 
 function send(message) {
     if (socket?.readyState === WebSocket.OPEN && !stopped) socket.send(JSON.stringify(message));
