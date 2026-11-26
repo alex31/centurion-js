@@ -7773,6 +7773,7 @@ class MMIOMux implements MemAccess, IOAccess {
 		this.interrupt_level = 0;
 		this.interrupt_pend = false;
 		this.mux_cause = false;
+		this.tx_int = 0;
 		this.muxports[0].reset();
 		this.muxports[1].reset();
 		this.muxports[2].reset();
@@ -7792,14 +7793,17 @@ class MMIOMux implements MemAccess, IOAccess {
 		if (address < 8) {
 			let selmux = this.muxports[address >> 1];
 			if (selmux) {
-				if ((address & 1) != 0) v = selmux.read_data();
-				else v = selmux.read_status();
-				if (this.tx_int > 0) {
-					this.interrupt_pend = true;
-					this.mux_cause = true;
+				if ((address & 1) != 0) {
+					v = selmux.read_data();
+					this.interrupt_pend = this.mux_cause =
+						this.tx_int !== 0 || this.muxports.some(port => port.read_busy);
+				} else {
+					v = selmux.read_status();
+					if (this.tx_int) this.interrupt_pend = this.mux_cause = true;
 				}
 			}
 		} else if (address == 15) {
+			v = 0xff; // Idle value used by centurion-c/mux.c. Zero identifies RX0.
 			if (this.mux_cause) {
 				this.mux_cause = false;
 				if (this.muxports[0].read_busy) {
@@ -7817,6 +7821,7 @@ class MMIOMux implements MemAccess, IOAccess {
 						if ((this.tx_int & q) != 0) {
 							v |= (i << 1) | 1;
 							this.tx_int ^= q;
+							this.interrupt_pend = this.mux_cause = this.tx_int !== 0;
 							break;
 						}
 					}
@@ -7850,8 +7855,7 @@ class MMIOMux implements MemAccess, IOAccess {
 			this.interrupt_level = value & 0xf;
 		} else if (address == 12) {
 			this.tx_int |= (value & 0xf);
-			this.interrupt_pend = true;
-			this.mux_cause = true;
+			if (value & 0xf) this.interrupt_pend = this.mux_cause = true;
 			//console.log('MUX:IFORCE');
 		} else if (address == 13) {
 			this.interrupt_en = false;
